@@ -40,6 +40,7 @@ export function Lobby({ room }: { room: RoomView }) {
   const isHost = room.me === room.hostId;
   const s = room.settings;
   const n = room.players.length;
+  const bots = room.players.filter((p) => p.bot).length;
   const update = (patch: Partial<Settings>) => void hostEmit('lobby:settings', patch);
   const onOff = (v: boolean) => (v ? 'On' : 'Off');
 
@@ -87,6 +88,7 @@ export function Lobby({ room }: { room: RoomView }) {
             <li key={p.id}>
               <span className={cls('conn', p.connected ? 'on' : 'off')} />
               <span className="grow">
+                {p.bot && '🤖 '}
                 {p.name}
                 {p.id === room.me && <span className="muted"> (you)</span>}
               </span>
@@ -99,7 +101,44 @@ export function Lobby({ room }: { room: RoomView }) {
             </li>
           ))}
         </ul>
+        {isHost && n < 8 && (
+          <div className="row gap wrap bot-row">
+            <button type="button" className="btn small" onClick={() => hostEmit('lobby:addBot')}>
+              🤖 Add a bot
+            </button>
+            {n < 5 && (
+              <button
+                type="button"
+                className="btn small ghost"
+                onClick={async () => {
+                  for (let i = n; i < 5; i++) if (!(await hostEmit('lobby:addBot'))) break;
+                }}
+              >
+                Fill to 5 with bots
+              </button>
+            )}
+          </div>
+        )}
+        {bots > 0 && (
+          <p className="tiny muted">
+            Bots play by the rules using only what their own screen shows. A friend who joins mid-game can take over a bot's seat.
+          </p>
+        )}
       </section>
+
+      {bots > 0 && (
+        <section className="card settings">
+          <Option
+            label="Test game: host's role"
+            hint="Only for games with bots. Everyone can see this setting."
+            value={s.testRole}
+            options={['random', 'mantri', 'agency'] as const}
+            render={(v) => (v === 'random' ? 'Random' : v === 'mantri' ? 'Mantri ji' : 'Honest agency')}
+            disabled={!isHost}
+            onPick={(testRole) => update({ testRole })}
+          />
+        </section>
+      )}
 
       <section className="card">
         <strong>Presets</strong>

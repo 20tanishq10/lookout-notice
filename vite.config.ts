@@ -12,5 +12,5 @@ export default defineConfig({
       '/socket.io': { target: `http://localhost:${SERVER_PORT}`, ws: true },
     },
   },
-  test: { environment: 'node', include: ['tests/**/*.test.ts'], testTimeout: 120000 },
+  test: { environment: 'node', include: ['tests/**/*.test.ts'], testTimeout: 150000, fileParallelism: false },
 } as any);

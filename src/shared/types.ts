@@ -119,6 +119,7 @@ export interface PlayerPublic {
   colour: string;
   connected: boolean;
   isHost: boolean;
+  bot: boolean;
   /** Omitted for other players in Hidden agencies mode. */
   agency?: AgencyId;
   jeep: RegionCode | null;
@@ -253,6 +254,7 @@ export interface LobbyPlayer {
   name: string;
   connected: boolean;
   isHost: boolean;
+  bot: boolean;
 }
 
 export interface RoomView {

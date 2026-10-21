@@ -103,7 +103,7 @@ function PlayersStrip({ g, focus, setFocus }: { g: GameView; focus: string | nul
           onClick={() => setFocus(focus === p.id ? null : p.id)}
         >
           <span className="dot" style={{ background: p.colour }} />
-          <span className="pname">{p.id === g.me.id ? 'You' : p.name}</span>
+          <span className="pname">{p.id === g.me.id ? 'You' : `${p.bot ? '🤖 ' : ''}${p.name}`}</span>
           {p.agency && <span className="pag">{AGENCIES[p.agency].short}</span>}
           {p.suspended && <span title="Suspended">⛔</span>}
           {!p.connected && <span title="Offline">⚡</span>}

@@ -17,6 +17,8 @@ export interface Settings {
   stings: 1 | 2 | 3;
   news: boolean;
   hiddenAgencies: boolean;
+  /** Test games with bots only: deal the host Mantri ji, or never. Ignored when the room has no bots. */
+  testRole: 'random' | 'mantri' | 'agency';
 }
 
 export const MIN_PLAYERS = 5;
@@ -50,6 +52,7 @@ export function defaultSettings(players = MIN_PLAYERS): Settings {
     stings: 2,
     news: true,
     hiddenAgencies: false,
+    testRole: 'random',
   };
 }
 
@@ -66,7 +69,7 @@ export const PRESETS: { id: string; name: string; desc: string; patch: (s: Setti
     desc: 'The default rules.',
     patch: (_s, players) => {
       const d = defaultSettings(players);
-      const { agencies: _a, ...rest } = d;
+      const { agencies: _a, testRole: _t, ...rest } = d;
       return rest;
     },
   },
@@ -155,5 +158,6 @@ export function sanitizeSettings(base: Settings, patch: unknown): Settings {
   pickNum('stings', [1, 2, 3] as const);
   pickBool('news');
   pickBool('hiddenAgencies');
+  if (p.testRole === 'random' || p.testRole === 'mantri' || p.testRole === 'agency') out.testRole = p.testRole;
   return out;
 }

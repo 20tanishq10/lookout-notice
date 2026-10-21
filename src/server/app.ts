@@ -68,7 +68,7 @@ export function createGameServer(opts: AppOptions = {}): { http: HttpServer; io:
         const mm = r?.member(s.pid);
         if (r && mm && !r.game && mm.sockets.size === 0) {
           r.removeMember(s.pid);
-          if (r.members.length === 0) rooms.rooms.delete(r.code);
+          if (r.members.every((x) => x.bot)) rooms.rooms.delete(r.code);
           else broadcast(r);
         }
       }, 60_000);
@@ -134,7 +134,7 @@ export function createGameServer(opts: AppOptions = {}): { http: HttpServer; io:
       detach(socket);
       if (!c.room.game) {
         c.room.removeMember(c.pid);
-        if (c.room.members.length === 0) rooms.rooms.delete(c.room.code);
+        if (c.room.members.every((x) => x.bot)) rooms.rooms.delete(c.room.code);
         else broadcast(c.room);
       }
       return { ok: true };
@@ -178,6 +178,7 @@ export function createGameServer(opts: AppOptions = {}): { http: HttpServer; io:
 
     hostAction('lobby:settings', (room, pid, patch) => room.updateSettings(pid, patch));
     hostAction('lobby:preset', (room, pid, p) => room.applyPreset(pid, p?.id));
+    hostAction('lobby:addBot', (room, pid) => room.addBot(pid));
     hostAction('lobby:kick', (room, pid, p) => {
       const res = room.kick(pid, String(p?.playerId ?? ''));
       if (res.ok) {

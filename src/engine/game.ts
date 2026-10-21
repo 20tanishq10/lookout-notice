@@ -110,6 +110,10 @@ export interface GameOptions {
   now?: () => number;
   /** Multiplies every phase length (tests use a tiny value). */
   timerScale?: number;
+  /** Test games: these players are dealt Mantri ji first… */
+  forceMantri?: PlayerId[];
+  /** …and these never are (unless there's nobody else). */
+  avoidMantri?: PlayerId[];
 }
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -168,7 +172,15 @@ export class Game {
 
     const agencies = this.rng.shuffle(this.settings.agencies);
     this.seats = players.map((p, i) => ({ id: p.id, name: p.name, agency: agencies[i], colour: COLOURS[i % COLOURS.length], mantri: false }));
-    for (const i of this.rng.shuffle(this.seats.map((_, i) => i)).slice(0, this.settings.mantris)) this.seats[i].mantri = true;
+    const order = this.rng.shuffle(this.seats.map((_, i) => i));
+    const rank = (i: number) => {
+      const id = this.seats[i].id;
+      if (opts.forceMantri?.includes(id)) return 0;
+      if (opts.avoidMantri?.includes(id)) return 2;
+      return 1;
+    };
+    order.sort((a, b) => rank(a) - rank(b));
+    for (const i of order.slice(0, this.settings.mantris)) this.seats[i].mantri = true;
 
     this.gates = gatesFor(this.settings.gates);
     this.circularsLeft = this.settings.circulars;
@@ -1049,7 +1061,7 @@ export class Game {
     };
   }
 
-  viewFor(pid: PlayerId, meta: { connected: Record<PlayerId, boolean>; hostId: PlayerId }): GameView {
+  viewFor(pid: PlayerId, meta: { connected: Record<PlayerId, boolean>; hostId: PlayerId; bots?: PlayerId[] }): GameView {
     const s = this.seat(pid)!;
     const rr = this.cur;
     const hidden = this.settings.hiddenAgencies;
@@ -1074,6 +1086,7 @@ export class Game {
         colour: p.colour,
         connected: meta.connected[p.id] ?? false,
         isHost: p.id === meta.hostId,
+        bot: meta.bots?.includes(p.id) ?? false,
         // Hidden agencies: you only see your own, except Mantri ji, whose insider knowledge covers every agency.
         agency: hidden && p.id !== pid && role !== 'mantri' ? undefined : p.agency,
         jeep: this.jeeps[p.id],

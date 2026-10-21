@@ -38,6 +38,10 @@ Every push to `main` redeploys automatically. The free plan sleeps after 15 minu
 
 Netlify and Vercel only host static sites and short-lived functions, so they can't run the game server.
 
+## Testing alone, or short on players
+
+In the lobby, the host can tap **🤖 Add a bot** or **Fill to 5 with bots**. The server plays bot seats using only what each bot's own screen shows. With bots in the room, the host can also choose to be dealt **Mantri ji** or an **honest agency** for test games, and everyone in the lobby can see that setting. A friend who joins mid-game can take over a bot's seat once the host approves.
+
 ## Scripts
 
 | Command | What it does |

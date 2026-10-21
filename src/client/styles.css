@@ -149,6 +149,7 @@ details.plain { padding: 0 2px; }
 .lobby-players li:last-child { border-bottom: 0; }
 .conn { width: 9px; height: 9px; border-radius: 50%; background: #555; }
 .conn.on { background: var(--green); }
+.bot-row { margin-top: 10px; }
 .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
 .preset {
   display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px; border-radius: 10px;
