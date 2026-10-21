@@ -81,6 +81,7 @@ export function botActions(view: GameView, rng: Rng): GameAction[] {
           : undefined;
         out.push({ type: 'nightOrders', orders: { steps, hawala: rng.next() < 0.4, fly: false, suitcaseTarget: target } });
       }
+      if (mantri && rng.next() < 0.5) out.push({ type: 'ready', ready: true });
       break;
     }
     case 'deploy': {

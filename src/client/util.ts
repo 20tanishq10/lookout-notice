@@ -3,26 +3,25 @@ import { AGENCIES } from '../shared/agencies';
 import type { GameView, Phase, PlayerId } from '../shared/types';
 import { useStore } from './net';
 
+/** A round has 4 steps: Night, Move, Report & discuss (post, then talk), Act. */
 export const PHASE_LABEL: Record<Phase, string> = {
   night: 'Night',
-  deploy: 'Deploy',
-  briefing: 'Briefing',
-  press: 'Press Release',
-  talk: 'Thana Talk',
-  action: 'Action',
+  deploy: 'Move',
+  briefing: 'Move',
+  press: 'Report & discuss',
+  talk: 'Report & discuss',
+  action: 'Act',
   inquiry: 'Inquiry',
   report: 'Commission Report',
 };
 
-export const PHASE_HINT: Record<Phase, string> = {
-  night: 'Mantri ji moves Bhagodalal in the dark.',
-  deploy: 'Move your jeep up to 2 borders.',
-  briefing: 'Your intel is on its way.',
-  press: 'Post your clue: the truth, a lie, or no comment.',
-  talk: 'Talk it out on your call. DM people privately.',
-  action: 'Propose and sign warrants. Vote on circulars.',
-  inquiry: 'Who is Mantri ji? Cast your vote.',
-  report: 'Everything is revealed.',
+export const PHASE_ICON: Record<Phase, string> = {
+  night: '🌙', deploy: '🚙', briefing: '🚙', press: '📰', talk: '🗣', action: '⚖', inquiry: '🏛', report: '📜',
+};
+
+/** Step number within a round (0 = not part of the round loop). */
+export const PHASE_STEP: Record<Phase, number> = {
+  night: 1, deploy: 2, briefing: 2, press: 3, talk: 3, action: 4, inquiry: 0, report: 0,
 };
 
 /** Re-render every `ms` milliseconds. */

@@ -25,7 +25,7 @@ export interface Member {
 const BOT_NAMES = ['Arjun', 'Priya', 'Kabir', 'Meera', 'Rohan', 'Ananya', 'Vikram', 'Isha', 'Dev', 'Zoya'];
 /** How long a bot "thinks" before acting in each phase, in seconds [min, max]. */
 const BOT_DELAY: Record<string, [number, number]> = {
-  night: [1.5, 3], deploy: [1.5, 4], briefing: [1, 2], press: [1.5, 4], talk: [3, 7], action: [2, 5], inquiry: [2, 5],
+  night: [1.5, 3], deploy: [1.5, 4], press: [1.5, 4], talk: [3, 7], action: [2, 5], inquiry: [2, 5],
 };
 
 interface Claim {
@@ -115,8 +115,11 @@ export class Room {
     return ok();
   }
 
+  /** Simple mode always deals the easy agencies; Advanced follows the player count until the host picks. */
   private syncAgencies(): void {
-    if (!this.agenciesTouched && !this.game) this.settings = { ...this.settings, agencies: suggestedAgencies(this.members.length) };
+    if (this.game) return;
+    const simple = this.settings.mode === 'simple';
+    if (simple || !this.agenciesTouched) this.settings = { ...this.settings, agencies: suggestedAgencies(this.members.length, this.settings.mode) };
   }
 
   // ───────── lobby (host only) ─────────
@@ -125,8 +128,14 @@ export class Room {
     if (by !== this.hostId) return err('Only the host can change settings.');
     if (this.game) return err('Settings are locked once the game starts.');
     const p = (patch ?? {}) as Record<string, unknown>;
-    if (Array.isArray(p.agencies)) this.agenciesTouched = true;
+    const before = this.settings.mode;
+    if (Array.isArray(p.agencies)) {
+      if (this.settings.mode === 'simple' && p.mode !== 'advanced') return err('Switch to Advanced to choose agencies.');
+      this.agenciesTouched = true;
+    }
     this.settings = sanitizeSettings(this.settings, patch);
+    if (this.settings.mode !== before) this.agenciesTouched = false;
+    this.syncAgencies();
     return ok();
   }
 
@@ -135,7 +144,10 @@ export class Room {
     if (this.game) return err('Settings are locked once the game starts.');
     const preset = PRESETS.find((p) => p.id === presetId);
     if (!preset) return err('Unknown preset.');
+    const wasSimple = this.settings.mode === 'simple';
     this.settings = sanitizeSettings(this.settings, preset.patch(this.settings, this.members.length));
+    if (wasSimple) this.agenciesTouched = false;
+    this.syncAgencies();
     return ok();
   }
 
@@ -179,6 +191,13 @@ export class Room {
     this.members = this.members.filter((m) => m.bot || m.sockets.size > 0 || m.id === this.hostId);
     this.syncAgencies();
     return ok();
+  }
+
+  advance(by: PlayerId): Ack {
+    if (by !== this.hostId) return err('Only the host can skip a step.');
+    if (!this.game) return err('No game running.');
+    if (this.game.paused) return err('Resume the game first.');
+    return this.game.forceAdvance() ? ok() : err('Nothing to skip.');
   }
 
   pause(by: PlayerId, paused: boolean): Ack {

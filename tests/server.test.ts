@@ -129,7 +129,7 @@ describe('server', () => {
     expect(created.ok).toBe(true);
     const start = await emit(s, 'game:start');
     expect(start.ok).toBe(false);
-    expect((await emit(s, 'lobby:settings', { rounds: 99, agencies: ['CBI', 'NOPE'] })).ok).toBe(true);
+    expect((await emit(s, 'lobby:settings', { rounds: 99, mode: 'advanced', agencies: ['CBI', 'NOPE'] })).ok).toBe(true);
     s.disconnect();
   });
 });

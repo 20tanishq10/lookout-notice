@@ -191,6 +191,7 @@ export function createGameServer(opts: AppOptions = {}): { http: HttpServer; io:
     });
     hostAction('game:start', (room, pid) => room.start(pid));
     hostAction('host:pause', (room, pid, p) => room.pause(pid, p?.paused === true));
+    hostAction('host:advance', (room, pid) => room.advance(pid));
     hostAction('host:lobby', (room, pid) => room.backToLobby(pid));
 
     socket.on('game:act', safe((action: GameAction) => {

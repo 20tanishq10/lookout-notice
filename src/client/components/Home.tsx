@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { emit, enterRoom, loadName, saveName, setClaimPending, toast, type Session } from '../net';
+import { Tutorial } from './Tutorial';
 
 export function Home() {
   const params = new URLSearchParams(location.search);
@@ -7,6 +8,7 @@ export function Home() {
   const [code, setCode] = useState((params.get('room') ?? '').toUpperCase().slice(0, 4));
   const [busy, setBusy] = useState(false);
   const [seats, setSeats] = useState<{ id: string; name: string }[] | null>(null);
+  const [help, setHelp] = useState(false);
 
   const go = async (event: 'room:create' | 'room:join') => {
     const n = name.trim();
@@ -80,15 +82,10 @@ export function Home() {
         </div>
       )}
 
-      <details className="card how">
-        <summary>How it works</summary>
-        <ul className="small">
-          <li>Everyone runs an agency (CBI, NIA, ED…) with its own kind of clue. One of you is secretly Mantri ji, who protects the fugitive.</li>
-          <li>Each round: Mantri ji moves him at night, you drive your jeep, get a private clue, then post a Press Release that can be true or false.</li>
-          <li>Argue it out, then sign a joint arrest warrant. Right region: you win the credit. Wrong: you lose points and a round.</li>
-          <li>Seal exit gates with Lookout Circulars before he flies out. At the end, vote on who Mantri ji was.</li>
-        </ul>
-      </details>
+      <button type="button" className="btn ghost" onClick={() => setHelp(true)}>
+        How to play
+      </button>
+      {help && <Tutorial onClose={() => setHelp(false)} />}
     </div>
   );
 }

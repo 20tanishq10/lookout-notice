@@ -257,6 +257,7 @@ export function houseBotActions(v: GameView, rng: Rng, mem: BotMemory): GameActi
   switch (v.phase) {
     case 'night': {
       if (m && !(m.ordersLocked && m.ordersBy !== me) && once('orders')) out.push({ type: 'nightOrders', orders: planNight(v, rng) });
+      if (m && !v.me.ready) out.push({ type: 'ready', ready: true });
       break;
     }
     case 'deploy': {

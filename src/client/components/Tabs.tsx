@@ -253,11 +253,11 @@ export function InfoTab({ g, marks, clearMarks }: { g: GameView; marks: Partial<
       <div className="card small">
         <strong>Quick rules</strong>
         <ul className="rules">
-          <li>A round: Night → Deploy → Briefing → Press Release → Thana Talk → Action.</li>
+          <li>A round has 4 steps: 🌙 Night → 🚙 Move → 📰 Report & discuss → ⚖ Act.</li>
           <li>Jeeps move up to 2 borders. Landing on him gives a private 🔥 Hot Trail and flushes him out.</li>
           <li>A warrant needs 2–3 signatures. Right region wins it; wrong costs each signer 3 points and a round.</li>
           <li>From Round {g.settings.earliestEscape}, he flies out from an unsealed gate he held for a full round with no jeep on it.</li>
-          <li>Every move posts a 📡 FASTag ping unless Mantri ji uses Hawala.</li>
+          <li>Every move he makes posts a 📡 FASTag ping{g.settings.hawala > 0 ? ' unless Mantri ji uses Hawala' : ''}.</li>
         </ul>
       </div>
     </div>

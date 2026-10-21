@@ -3,12 +3,13 @@ import { AGENCIES } from '../../shared/agencies';
 import { REGIONS, type RegionCode } from '../../shared/regions';
 import type { GameView, RoomView } from '../../shared/types';
 import { act, hostEmit, useStore } from '../net';
-import { PHASE_LABEL, cls, fmtTime, labelOf, nameOf, useSecondsLeft } from '../util';
+import { PHASE_ICON, PHASE_LABEL, PHASE_STEP, cls, fmtTime, labelOf, nameOf, useSecondsLeft } from '../util';
 import { Board, type Mark } from './Board';
 import { nextSteps } from './MantriTools';
 import { PhasePanel } from './PhasePanel';
 import { Report } from './Report';
 import { ChatTab, FeedTab, InfoTab, IntelTab } from './Tabs';
+import { Tutorial, tutorialSeen } from './Tutorial';
 
 type Tab = 'phase' | 'feed' | 'intel' | 'chat' | 'info';
 
@@ -48,24 +49,34 @@ function useUnread(ids: number[], active: boolean): number {
   return ids.filter((id) => id > seen).length;
 }
 
-function TopBar({ room, g }: { room: RoomView; g: GameView }) {
+function TopBar({ room, g, onHelp }: { room: RoomView; g: GameView; onHelp: () => void }) {
   const secs = useSecondsLeft(g);
   const connected = useStore((s) => s.connected);
   const isHost = room.me === room.hostId;
   const [menu, setMenu] = useState(false);
-  const urgent = secs <= 5 && g.phase !== 'report';
+  const timed = g.phaseEndsAt > 0 || (g.paused && g.pausedRemaining > 0);
+  const urgent = timed && secs <= 5 && g.phase !== 'report';
+  const step = PHASE_STEP[g.phase];
   return (
     <header className="topbar">
       <div className="tb-left">
         <div className="tb-round">
-          Round {g.round}/{g.rounds}
+          Round {g.round} of {g.rounds}
+          {step > 0 && ` · Step ${step} of 4`}
         </div>
-        <div className="tb-phase">{PHASE_LABEL[g.phase]}</div>
+        <div className="tb-phase">
+          {PHASE_ICON[g.phase]} {PHASE_LABEL[g.phase]}
+        </div>
       </div>
-      <div className={cls('tb-timer', urgent && 'urgent', g.paused && 'paused')}>{g.paused ? '⏸ Paused' : fmtTime(secs)}</div>
+      <div className={cls('tb-timer', urgent && 'urgent', (g.paused || !timed) && 'paused')}>
+        {g.paused ? '⏸ Paused' : timed ? fmtTime(secs) : 'No timer'}
+      </div>
       <div className="tb-right">
         {!connected && <span className="offline">Reconnecting…</span>}
         <span className="tb-agency">{AGENCIES[g.me.agency].short}</span>
+        <button type="button" className="icon-btn" aria-label="How to play" onClick={onHelp}>
+          ?
+        </button>
         {isHost && (
           <button type="button" className="icon-btn" aria-label="Host menu" onClick={() => setMenu((m) => !m)}>
             ⋮
@@ -74,6 +85,9 @@ function TopBar({ room, g }: { room: RoomView; g: GameView }) {
       </div>
       {menu && isHost && (
         <div className="menu" onClick={() => setMenu(false)}>
+          <button type="button" onClick={() => hostEmit('host:advance')}>
+            ⏭ Skip to the next step
+          </button>
           <button type="button" onClick={() => hostEmit('host:pause', { paused: !g.paused })}>
             {g.paused ? '▶ Resume game' : '⏸ Pause game'}
           </button>
@@ -107,7 +121,7 @@ function PlayersStrip({ g, focus, setFocus }: { g: GameView; focus: string | nul
           {p.agency && <span className="pag">{AGENCIES[p.agency].short}</span>}
           {p.suspended && <span title="Suspended">⛔</span>}
           {!p.connected && <span title="Offline">⚡</span>}
-          {(g.phase === 'talk' || g.phase === 'action' || g.phase === 'deploy') && p.ready && <span title="Done">✓</span>}
+          {(g.phase === 'talk' || g.phase === 'action' || g.phase === 'deploy' || g.phase === 'night') && p.ready && <span title="Done">✓</span>}
           {g.phase === 'press' && p.posted && <span title="Posted">📝</span>}
         </button>
       ))}
@@ -195,10 +209,12 @@ export function GameScreen({ room }: { room: RoomView }) {
   const [plan, setPlan] = useState<RegionCode[]>([]);
   const [warrantRegion, setWarrantRegion] = useState<RegionCode | null>(null);
   const [marks, setMark, clearMarks] = useMarks(`${room.code}-${room.me}`);
+  const [help, setHelp] = useState(() => !tutorialSeen());
 
   // Reset per-phase helpers when the phase changes.
   useEffect(() => {
     setTab('phase');
+    setSelected(null); // a region card left open would push the new step off screen
     if (g.phase === 'night' && !g.mantri?.orders) setPlan([]);
     if (g.phase !== 'action') setWarrantRegion(null);
   }, [g.phase, g.round]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -230,8 +246,9 @@ export function GameScreen({ room }: { room: RoomView }) {
 
   return (
     <div className="game">
-      <TopBar room={room} g={g} />
-      <div className={cls('map-area', !mapOpen && 'collapsed', (g.phase === 'deploy' || g.phase === 'night' || selected) && 'tall')}>
+      <TopBar room={room} g={g} onHelp={() => setHelp(true)} />
+      {help && <Tutorial onClose={() => setHelp(false)} />}
+      <div className={cls('map-area', !mapOpen && 'collapsed', (g.phase === 'deploy' || g.phase === 'night') && 'tall')}>
         {mapOpen && (
           <div className="board-wrap">
             <Board
@@ -300,7 +317,7 @@ export function GameScreen({ room }: { room: RoomView }) {
       <nav className="tabs">
         {(
           [
-            ['phase', '🎯', PHASE_LABEL[g.phase], 0],
+            ['phase', PHASE_ICON[g.phase], 'Play', 0],
             ['feed', '📰', 'Feed', feedUnread],
             ['intel', '🗂', 'Intel', intelUnread],
             ['chat', '💬', 'Chat', chatUnread],

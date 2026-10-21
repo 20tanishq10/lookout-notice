@@ -4,7 +4,7 @@ import { areNeighbours, reachable } from '../shared/graph';
 import { NEWS, NEWS_IDS, type NewsId } from '../shared/news';
 import { REGIONS, REGION_CODES, gatesFor, isRegionCode, type RegionCode } from '../shared/regions';
 import { Rng } from '../shared/rng';
-import { TIMERS, type Settings } from '../shared/settings';
+import { TIMERS, effectiveSettings, type Settings } from '../shared/settings';
 import type {
   CircularView, Clue, Dm, EdQuestion, FeedItem, FeedKind, GameAction, GameView, MantriView, Metric, NightOrders,
   Outcome, Phase, PlayerId, PressClaim, PressRow, PrivateItem, Report, ReportRound, Role, ScoreLine, StingResult,
@@ -165,7 +165,7 @@ export class Game {
   outcome: Outcome | null = null;
 
   constructor(players: { id: PlayerId; name: string }[], settings: Settings, opts: GameOptions = {}) {
-    this.settings = { ...settings, agencies: [...settings.agencies] };
+    this.settings = effectiveSettings(settings);
     this.rng = new Rng(opts.seed);
     this.clock = opts.now ?? Date.now;
     this.scale = opts.timerScale ?? 1;
@@ -264,11 +264,9 @@ export class Game {
   private enterPhase(p: Phase): void {
     this.phase = p;
     this.ready.clear();
-    if (p === 'report') {
-      this.phaseEndsAt = 0;
-      return;
-    }
-    this.phaseEndsAt = this.clock() + TIMERS[this.settings.timers][p] * 1000 * this.scale;
+    const secs = p === 'report' ? 0 : TIMERS[this.settings.timers][p];
+    // 0 = no timer: the step ends when everyone is done, or when the host skips it.
+    this.phaseEndsAt = secs > 0 ? this.clock() + secs * 1000 * this.scale : 0;
   }
 
   // ───────────────────────── clock ─────────────────────────
@@ -276,28 +274,38 @@ export class Game {
   /** Advance the phase if its timer ran out or everyone is done. Returns true if anything changed. */
   tick(): boolean {
     if (this.paused || this.phase === 'report') return false;
-    if (this.clock() >= this.phaseEndsAt || this.earlyDone()) {
+    const due = this.phaseEndsAt > 0 && this.clock() >= this.phaseEndsAt;
+    if (due || this.earlyDone()) {
       this.advance();
       return true;
     }
     return false;
   }
 
+  /** Host control: end the current step now, as if its timer ran out. */
+  forceAdvance(): boolean {
+    if (this.paused || this.phase === 'report') return false;
+    this.advance();
+    return true;
+  }
+
   pause(): void {
     if (this.paused || this.phase === 'report') return;
     this.paused = true;
-    this.pausedRemaining = Math.max(0, this.phaseEndsAt - this.clock());
+    this.pausedRemaining = this.phaseEndsAt > 0 ? Math.max(1, this.phaseEndsAt - this.clock()) : 0;
   }
 
   resume(): void {
     if (!this.paused) return;
     this.paused = false;
-    this.phaseEndsAt = this.clock() + this.pausedRemaining;
+    this.phaseEndsAt = this.pausedRemaining > 0 ? this.clock() + this.pausedRemaining : 0;
   }
 
   private earlyDone(): boolean {
     const rr = this.cur;
     switch (this.phase) {
+      case 'night':
+        return this.mantriIds().every((id) => this.ready.has(id));
       case 'deploy':
         return this.seats.filter((s) => !rr.suspended.has(s.id)).every((s) => this.ready.has(s.id));
       case 'press':
@@ -316,7 +324,7 @@ export class Game {
     switch (this.phase) {
       case 'night': return this.resolveNight();
       case 'deploy': return this.resolveDeploy();
-      case 'briefing': return this.finishBriefing();
+      case 'briefing': return this.deliverClues();
       case 'press': return this.publishPress();
       case 'talk': return this.enterPhase('action');
       case 'action': return this.resolveAction();
@@ -521,8 +529,9 @@ export class Game {
     }
     this.deployChoice.clear();
     rr.jeeps = { ...this.jeeps } as Record<PlayerId, RegionCode>;
-    this.enterPhase('briefing');
+    // Clues go out the moment everyone has moved (no separate Briefing step).
     this.computeClues();
+    this.deliverClues();
   }
 
   private computeClues(): void {
@@ -543,7 +552,7 @@ export class Game {
     }
   }
 
-  private finishBriefing(): void {
+  private deliverClues(): void {
     const rr = this.cur;
     const F = this.fugitive;
     if (this.leakArmed) {
@@ -844,7 +853,8 @@ export class Game {
         return OK;
       }
       case 'ready': {
-        if (this.phase !== 'deploy' && this.phase !== 'talk' && this.phase !== 'action') return fail('Nothing to confirm right now.');
+        if (this.phase === 'night' && !s.mantri) return fail('Nothing to confirm right now.');
+        if (this.phase !== 'night' && this.phase !== 'deploy' && this.phase !== 'talk' && this.phase !== 'action') return fail('Nothing to confirm right now.');
         if (a.ready) this.ready.add(pid);
         else this.ready.delete(pid);
         return OK;
@@ -973,7 +983,7 @@ export class Game {
       }
       case 'leakArm': {
         if (!s.mantri) return fail('Only Mantri ji can plant leaks.');
-        if (this.phase !== 'deploy' && this.phase !== 'briefing') return fail('Leaks are planted during Deploy or Briefing.');
+        if (this.phase !== 'deploy') return fail('Leaks are planted during the Move step.');
         if (this.tools.leaks < 1) return fail('No Planted Leaks left.');
         if (rr.leakUsed) return fail('Only one leak per round.');
         const t = this.seat(a.target);
@@ -982,16 +992,9 @@ export class Game {
         const clue = cleanClue(a.clue, this.seats.map((x) => x.id), this.settings.distance);
         if (!clue) return fail("That isn't a valid clue.");
         if (clue.kind !== AGENCY_CLUE[t.agency]) return fail(`The fake must use the ${AGENCIES[t.agency].name} format.`);
-        if (this.phase === 'briefing') {
-          const rec = rr.clues.get(a.target);
-          if (rec?.hot) return fail("Their jeep is on him: a leak can't hide a Hot Trail.");
-          const problem = rec ? leakProblem(clue, rec.truth, rec.from) : null;
-          if (problem) return fail(problem);
-        } else {
-          // Their jeep isn't final yet: only the format rules can be checked now. The rest is checked at Briefing.
-          const problem = leakProblem(clue, clue, null);
-          if (problem) return fail(problem);
-        }
+        // Their jeep isn't final yet, so only the format rules can be checked now; the rest is checked when clues go out.
+        const problem = leakProblem(clue, clue, null);
+        if (problem) return fail(problem);
         this.leakArmed = { by: pid, target: a.target, clue };
         return OK;
       }

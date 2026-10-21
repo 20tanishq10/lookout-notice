@@ -23,8 +23,14 @@ export function nextSteps(g: GameView, plan: RegionCode[]): RegionCode[] {
   return REGIONS[end].borders.filter((b) => b !== flood && (m.reachable.includes(b) || b === m.fugitive));
 }
 
-export function MantriOrders(props: { g: GameView; plan: RegionCode[]; setPlan: (p: RegionCode[]) => void }) {
-  const { g, plan, setPlan } = props;
+export function MantriOrders(props: {
+  g: GameView;
+  plan: RegionCode[];
+  setPlan: (p: RegionCode[]) => void;
+  /** At Night the step's main button saves the orders, so this card shows no Save button. */
+  onOrders?: (o: NightOrders) => void;
+}) {
+  const { g, plan, setPlan, onOrders } = props;
   const m = g.mantri!;
   const [hawala, setHawala] = useState(m.orders?.hawala ?? false);
   const [fly, setFly] = useState(m.orders?.fly ?? false);
@@ -48,6 +54,17 @@ export function MantriOrders(props: { g: GameView; plan: RegionCode[]; setPlan: 
   const orders: NightOrders = { steps: fly ? [] : plan, hawala: !fly && hawala && normalSteps > 0, fly, suitcaseTarget: target || undefined };
   const saved = sameOrders(m.orders, orders);
   const candidates = g.players.filter((p) => p.id !== g.me.id && !m.partners.includes(p.id) && !m.bought.includes(p.id));
+  const ordersKey = JSON.stringify(orders);
+  useEffect(() => {
+    onOrders?.(orders);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordersKey]);
+  const tools = [
+    g.settings.hawala > 0 && `Hawala ${m.hawalaLeft}`,
+    g.settings.leaks > 0 && `Leaks ${m.leaksLeft}`,
+    g.settings.suitcase && `Suitcase ${m.suitcaseUsed ? 'used' : 'unused'}`,
+    m.bought.length > 0 && `Bought: ${m.bought.map((id) => nameOf(g, id)).join(', ')}`,
+  ].filter(Boolean);
 
   return (
     <div className="card mantri">
@@ -59,7 +76,7 @@ export function MantriOrders(props: { g: GameView; plan: RegionCode[]; setPlan: 
       {m.flushed && <p className="warn small">🔥 He was flushed out: he must end the night somewhere else.</p>}
       {m.tipOffPending && <p className="small">⚡ Tip-off: his first step tonight is free and silent.</p>}
       {g.phase === 'night' && g.news && <p className="small muted">📰 {g.news.title}: {g.news.text}</p>}
-      {preview && <p className="small muted">Saved now, used at Night. Tonight's Breaking News could still change what's allowed.</p>}
+      {preview && <p className="small muted">Saved now, used at Night{g.settings.news ? ". Tonight's Breaking News could still change what's allowed" : ''}.</p>}
 
       {m.canFly && (
         <label className="toggle big">
@@ -90,6 +107,7 @@ export function MantriOrders(props: { g: GameView; plan: RegionCode[]; setPlan: 
           </div>
           {options.length > 0 && !lockedByPartner && (
             <div className="seg wrap">
+              <span className="small muted">Move him to:</span>
               {options.map((c) => (
                 <button key={c} type="button" className="chip" onClick={() => setPlan([...plan, c])}>
                   → {REGIONS[c].name}
@@ -121,18 +139,17 @@ export function MantriOrders(props: { g: GameView; plan: RegionCode[]; setPlan: 
         </label>
       )}
 
-      <button
-        type="button"
-        className={cls('btn', saved ? 'ghost' : 'primary')}
-        disabled={lockedByPartner || saved}
-        onClick={() => act({ type: 'nightOrders', orders })}
-      >
-        {saved ? 'Orders saved ✓' : 'Save orders'}
-      </button>
-      <p className="small muted">
-        Hawala {m.hawalaLeft} · Leaks {m.leaksLeft} · Suitcase {m.suitcaseUsed ? 'used' : 'unused'}
-        {m.bought.length ? ` · Bought: ${m.bought.map((id) => nameOf(g, id)).join(', ')}` : ''}
-      </p>
+      {!onOrders && (
+        <button
+          type="button"
+          className={cls('btn', saved ? 'ghost' : 'primary')}
+          disabled={lockedByPartner || saved}
+          onClick={() => act({ type: 'nightOrders', orders })}
+        >
+          {saved ? 'Saved for tonight ✓' : 'Save for tonight'}
+        </button>
+      )}
+      {tools.length > 0 && <p className="small muted">{tools.join(' · ')}</p>}
     </div>
   );
 }

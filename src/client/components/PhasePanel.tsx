@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
-import { AGENCIES } from '../../shared/agencies';
+import { useEffect, useState, type ReactNode } from 'react';
 import { describeClue } from '../../shared/describe';
 import { REGIONS, REGION_CODES, type RegionCode } from '../../shared/regions';
-import type { Clue, ClueKind, GameView } from '../../shared/types';
+import type { Clue, ClueKind, GameView, NightOrders } from '../../shared/types';
 import { act } from '../net';
-import { cls, labelOf, nameOf, PHASE_HINT } from '../util';
+import { cls, labelOf, nameOf } from '../util';
 import { ClueEditor, EdQuestionPicker, defaultClue, kindLabel } from './ClueEditor';
 import { LeakComposer, MantriOrders } from './MantriTools';
 import { PressList, StingCard } from './PressList';
@@ -18,6 +17,33 @@ export interface PanelProps {
 }
 
 const byName = (a: RegionCode, b: RegionCode) => REGIONS[a].name.localeCompare(REGIONS[b].name);
+
+/** The one-line "what do I do now" card at the top of every step. */
+function StepCard({ icon, title, children }: { icon: string; title: string; children: ReactNode }) {
+  return (
+    <div className="stepcard">
+      <div className="step-icon">{icon}</div>
+      <div>
+        <strong>{title}</strong>
+        <div className="small">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** The step's single main button, pinned above the tab bar. */
+function MainBar({ children, status }: { children?: ReactNode; status?: string }) {
+  return (
+    <div className="mainbar">
+      {children}
+      {status && <span className="muted small">{status}</span>}
+    </div>
+  );
+}
+
+function waitingFor(g: GameView, count: number): string {
+  return count === 0 ? 'Everyone is done' : `Waiting for ${count} player${count === 1 ? '' : 's'}`;
+}
 
 export function NewsCard({ g }: { g: GameView }) {
   if (!g.news) return null;
@@ -33,27 +59,14 @@ export function NewsCard({ g }: { g: GameView }) {
   );
 }
 
-function ReadyButton({ g, label }: { g: GameView; label: string }) {
-  const ready = g.me.ready;
-  const waiting = g.players.filter((p) => !p.ready && !(g.phase === 'deploy' && p.suspended)).length;
-  return (
-    <div className="ready-row">
-      <button type="button" className={cls('btn', ready ? 'ghost' : 'primary')} onClick={() => act({ type: 'ready', ready: !ready })}>
-        {ready ? '✓ Done (tap to undo)' : label}
-      </button>
-      <span className="muted small">{waiting === 0 ? 'Everyone is done' : `Waiting for ${waiting}`}</span>
-    </div>
-  );
-}
-
 function SuitcaseCard({ g }: { g: GameView }) {
   if (g.suitcaseOffer?.status !== 'pending') return null;
   return (
     <div className="card suitcase">
       <strong>💼 A sealed suitcase has arrived</strong>
       <p className="small">
-        Accept and you switch sides: you learn who Mantri ji is and where Bhagodalal hides, and you score when he gets away. Refuse
-        and you earn +2 Imaandar points plus a hint about who sent it. No answer by the end of Action counts as Refuse.
+        Take it and you switch sides: you learn who Mantri ji is and where Bhagodalal hides, and you score if he gets away. Refuse and you get +2
+        points plus a hint about who sent it.
       </p>
       <div className="row gap">
         <button type="button" className="btn danger" onClick={() => act({ type: 'suitcaseRespond', accept: true })}>
@@ -68,64 +81,123 @@ function SuitcaseCard({ g }: { g: GameView }) {
 }
 
 export function SecretCard({ g }: { g: GameView }) {
-  if (g.bought) {
-    return (
-      <div className="card bought">
-        <strong>💰 You're Bought</strong>
-        <div className="small">
-          Mantri ji: {g.bought.mantris.map((id) => nameOf(g, id)).join(', ')} · He is in <b>{REGIONS[g.bought.fugitive].name}</b>
-        </div>
+  if (!g.bought) return null;
+  return (
+    <div className="card bought">
+      <strong>💰 You're Bought</strong>
+      <div className="small">
+        Mantri ji: {g.bought.mantris.map((id) => nameOf(g, id)).join(', ')} · He is in <b>{REGIONS[g.bought.fugitive].name}</b>
       </div>
-    );
-  }
-  return null;
+    </div>
+  );
 }
 
 function MyClue({ g }: { g: GameView }) {
   if (!g.myClue) return null;
   return (
     <div className={cls('card intel', g.myClue.hot && 'hot')}>
-      <div className="kicker">Your intel · from {REGIONS[g.myClue.from].name}</div>
+      <div className="kicker">Your clue · from {REGIONS[g.myClue.from].name}</div>
       <strong>{describeClue(g.myClue.clue, (id) => labelOf(g, id))}</strong>
       {g.myClue.hot && <div className="hot-msg">🔥 Hot Trail: he is in {REGIONS[g.myClue.from].name} right now!</div>}
     </div>
   );
 }
 
-function NightPanel({ g, plan, setPlan }: PanelProps) {
+function MantriPreview({ g, plan, setPlan }: Pick<PanelProps, 'g' | 'plan' | 'setPlan'>) {
+  if (!g.mantri || g.round >= g.rounds) return null;
   return (
-    <div className="stack">
-      <div className="hero">
-        <div className="moon">🌙</div>
-        <div>
-          <strong>Night {g.round}</strong>
-          <div className="muted small">Mantri ji is moving Bhagodalal in the dark.</div>
-        </div>
-      </div>
-      <NewsCard g={g} />
-      {g.me.suspended && <p className="warn small">You're suspended this round after a wrong warrant.</p>}
-      {g.mantri && <MantriOrders g={g} plan={plan} setPlan={setPlan} />}
-      <SecretCard g={g} />
-    </div>
+    <details className="plain">
+      <summary>🎩 Plan tonight's move early</summary>
+      <MantriOrders g={g} plan={plan} setPlan={setPlan} />
+    </details>
   );
 }
 
-function DeployPanel({ g }: PanelProps) {
+// ───────────── Step 1: Night ─────────────
+
+function NightStep({ g, plan, setPlan }: PanelProps) {
+  const [orders, setOrders] = useState<NightOrders | null>(null);
+  const m = g.mantri;
+  if (!m) {
+    return (
+      <>
+        <StepCard icon="🌙" title="Night">
+          Mantri ji is secretly moving Bhagodalal. Hang on a moment.
+        </StepCard>
+        <NewsCard g={g} />
+        <SecretCard g={g} />
+        <MainBar status="Waiting for Mantri ji…" />
+      </>
+    );
+  }
+  const lockedByPartner = m.ordersLocked && m.ordersBy !== g.me.id;
+  const confirm = async () => {
+    if (orders && !lockedByPartner && !(await act({ type: 'nightOrders', orders }))) return;
+    await act({ type: 'ready', ready: true });
+  };
+  return (
+    <>
+      <StepCard icon="🌙" title="Night: move Bhagodalal">
+        Pick where he goes tonight, or leave him where he is. Then tap Confirm.
+      </StepCard>
+      <NewsCard g={g} />
+      <MantriOrders g={g} plan={plan} setPlan={setPlan} onOrders={setOrders} />
+      <MainBar>
+        {g.me.ready ? (
+          <button type="button" className="btn ghost" onClick={() => act({ type: 'ready', ready: false })}>
+            ✓ Confirmed (tap to change)
+          </button>
+        ) : (
+          <button type="button" className="btn primary" onClick={() => void confirm()}>
+            Confirm night move
+          </button>
+        )}
+      </MainBar>
+    </>
+  );
+}
+
+// ───────────── Step 2: Move ─────────────
+
+function MoveStep({ g }: PanelProps) {
   const me = g.players.find((p) => p.id === g.me.id)!;
   const options = g.deployOptions ? [...g.deployOptions].sort(byName) : null;
+  const waiting = g.players.filter((p) => !p.ready && !p.suspended).length;
+  if (!options) {
+    return (
+      <>
+        <StepCard icon="🚙" title="Move: you sit this one out">
+          You signed a wrong warrant, so your jeep stays put and you get no clue this round.
+        </StepCard>
+        <MainBar status={waitingFor(g, waiting)} />
+      </>
+    );
+  }
+  const dest = g.myDeploy ?? me.jeep;
   return (
-    <div className="stack">
+    <>
+      <StepCard icon="🚙" title={g.round === 1 ? 'Place your jeep' : 'Move your jeep'}>
+        {g.round === 1 ? 'Tap any region on the map.' : 'Tap a lit-up region on the map (up to 2 borders away).'} Your clue arrives once everyone
+        has moved.
+      </StepCard>
       <NewsCard g={g} />
-      {!options ? (
-        <p className="warn">You're suspended this round. Your jeep stays where it is.</p>
-      ) : (
-        <div className="card">
-          <strong>🚙 Move your jeep</strong>
-          <p className="small muted">
-            {g.round === 1 ? 'Place it anywhere on the map.' : `It's in ${me.jeep ? REGIONS[me.jeep].name : '?'}. Tap a lit-up region, or pick one below.`}
-          </p>
-          <select value={g.myDeploy ?? me.jeep ?? ''} onChange={(e) => act({ type: 'deploy', region: e.target.value as RegionCode })}>
-            {!g.myDeploy && !me.jeep && <option value="">Choose a region</option>}
+      <div className="card">
+        <div className="row between">
+          <span>
+            {dest ? (
+              <>
+                {dest === me.jeep && g.round > 1 ? 'Staying in ' : 'Heading to '}
+                <b>{REGIONS[dest].name}</b>
+              </>
+            ) : (
+              <span className="muted">No region picked yet</span>
+            )}
+          </span>
+        </div>
+        <details>
+          <summary className="small">Pick from a list instead</summary>
+          <select value={dest ?? ''} onChange={(e) => act({ type: 'deploy', region: e.target.value as RegionCode })}>
+            {!dest && <option value="">Choose a region</option>}
             {options.map((c) => (
               <option key={c} value={c}>
                 {REGIONS[c].name}
@@ -133,18 +205,17 @@ function DeployPanel({ g }: PanelProps) {
               </option>
             ))}
           </select>
-          {g.myDeploy && <p className="small">Heading to <b>{REGIONS[g.myDeploy].name}</b>.</p>}
-        </div>
-      )}
-      {g.me.agency === 'ED' && options && (
+        </details>
+      </div>
+      {g.me.agency === 'ED' && (
         <div className="card">
-          <strong>💸 ED question for this round</strong>
+          <strong>💸 Your ED question this round</strong>
           <EdQuestionPicker value={g.myEdQuestion ?? { q: 'coastal' }} onChange={(question) => act({ type: 'edQuestion', question })} />
         </div>
       )}
-      {g.me.agency === 'IT' && options && (
+      {g.me.agency === 'IT' && (
         <div className="card">
-          <strong>🧾 Income Tax comparison</strong>
+          <strong>🧾 Compare his region with yours on</strong>
           <div className="seg">
             {(['seats', 'neighbours'] as const).map((m) => (
               <button key={m} type="button" className={cls('chip', (g.myItMetric ?? 'seats') === m && 'on')} onClick={() => act({ type: 'itMetric', metric: m })}>
@@ -154,32 +225,28 @@ function DeployPanel({ g }: PanelProps) {
           </div>
         </div>
       )}
-      {g.mantri && <LeakComposer g={g} />}
+      {g.mantri && g.settings.leaks > 0 && <LeakComposer g={g} />}
       <SecretCard g={g} />
-      {options && <ReadyButton g={g} label="Confirm deployment" />}
-    </div>
+      <MainBar status={waitingFor(g, waiting)}>
+        {g.me.ready ? (
+          <button type="button" className="btn ghost" onClick={() => act({ type: 'ready', ready: false })}>
+            ✓ Confirmed (tap to change)
+          </button>
+        ) : (
+          <button type="button" className="btn primary" disabled={!dest} onClick={() => act({ type: 'ready', ready: true })}>
+            Confirm move
+          </button>
+        )}
+      </MainBar>
+    </>
   );
 }
 
-function BriefingPanel({ g }: PanelProps) {
-  return (
-    <div className="stack">
-      <div className="hero">
-        <div className="spinner" />
-        <div>
-          <strong>Intel incoming…</strong>
-          <div className="muted small">Every agency's clue arrives at the same moment.</div>
-        </div>
-      </div>
-      {g.mantri && <LeakComposer g={g} />}
-      <SecretCard g={g} />
-    </div>
-  );
-}
+// ───────────── Step 3a: Report ─────────────
 
 const ALL_KINDS: ClueKind[] = ['CBI', 'NIA', 'CYBER', 'POLICE', 'CRIME', 'ED', 'IT', 'CUSTOMS', 'RPF', 'RAW', 'IB'];
 
-function PressPanel({ g }: PanelProps) {
+function ReportStep({ g }: PanelProps) {
   const truth = g.myClue;
   const [draft, setDraft] = useState<Clue | null>(truth?.clue ?? null);
   const [hot, setHot] = useState(truth?.hot ?? false);
@@ -190,38 +257,39 @@ function PressPanel({ g }: PanelProps) {
     setEditing(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [g.round, JSON.stringify(truth)]);
+  const notPosted = g.players.filter((p) => !p.posted && !p.suspended && p.agency !== 'MEDIA').length;
 
   if (!truth) {
     return (
-      <div className="stack">
-        <p className="muted">{g.me.agency === 'MEDIA' ? '📺 Media has no clue to post. Stings open during Thana Talk.' : "You have no clue to report this round."}</p>
+      <>
+        <StepCard icon="📰" title="Report">
+          {g.me.agency === 'MEDIA' ? "Media gets no clue. Everyone's posts appear in a moment." : 'You have no clue this round.'}
+        </StepCard>
         <SecretCard g={g} />
-      </div>
+        <MainBar status={`Waiting for posts…`} />
+      </>
     );
   }
   const posted = g.myPress;
-  const posting = !posted || editing;
+  const post = (claim: Parameters<typeof act>[0]) => act(claim).then(() => setEditing(false));
   return (
-    <div className="stack">
+    <>
+      <StepCard icon="📰" title="Report your clue">
+        Post it for everyone: the truth, a lie, or nothing. All posts appear together, so nobody can copy.
+      </StepCard>
       <MyClue g={g} />
-      {posted && !editing && (
+      {posted && !editing ? (
         <div className="card">
-          <div className="kicker">Your Press Release</div>
+          <div className="kicker">You posted</div>
           <strong>{posted.none ? 'No comment' : describeClue(posted.clue, (id) => labelOf(g, id)) + (posted.hot ? ' · claims Hot Trail' : '')}</strong>
           <button type="button" className="link" onClick={() => setEditing(true)}>
             Change it
           </button>
         </div>
-      )}
-      {posting && draft && (
-        <div className="card">
-          <strong>📰 Press Release</strong>
-          <p className="small muted">Everyone sees every release at once. You can tell the truth, lie, or stay quiet.</p>
-          <button type="button" className="btn primary" onClick={() => act({ type: 'press', claim: { clue: truth.clue, hot: truth.hot } }).then(() => setEditing(false))}>
-            Post the truth
-          </button>
-          <details>
-            <summary>Post something else…</summary>
+      ) : (
+        draft && (
+          <details className="card">
+            <summary>Post a lie or stay quiet instead</summary>
             {g.settings.hiddenAgencies && (
               <label className="field">
                 <span>Format (you can pose as another agency)</span>
@@ -239,30 +307,45 @@ function PressPanel({ g }: PanelProps) {
               <input type="checkbox" checked={hot} onChange={(e) => setHot(e.target.checked)} />
               <span>Claim a 🔥 Hot Trail</span>
             </label>
-            <button type="button" className="btn" onClick={() => act({ type: 'press', claim: { clue: draft, hot } }).then(() => setEditing(false))}>
-              Post this version
-            </button>
+            <div className="row gap wrap">
+              <button type="button" className="btn" onClick={() => void post({ type: 'press', claim: { clue: draft, hot } })}>
+                Post this version
+              </button>
+              <button type="button" className="btn ghost" onClick={() => void post({ type: 'press', claim: { none: true } })}>
+                Post "No comment"
+              </button>
+            </div>
           </details>
-          <button type="button" className="btn ghost" onClick={() => act({ type: 'press', claim: { none: true } }).then(() => setEditing(false))}>
-            No comment
-          </button>
-        </div>
+        )
       )}
       <SecretCard g={g} />
-    </div>
+      <MainBar status={posted && !editing ? `Posted ✓ · ${waitingFor(g, notPosted)}` : undefined}>
+        {(!posted || editing) && (
+          <button type="button" className="btn primary" onClick={() => void post({ type: 'press', claim: { clue: truth.clue, hot: truth.hot } })}>
+            Post the truth
+          </button>
+        )}
+      </MainBar>
+    </>
   );
 }
 
-function TalkPanel({ g, plan, setPlan }: PanelProps) {
+// ───────────── Step 3b: Discuss ─────────────
+
+function DiscussStep({ g, plan, setPlan }: PanelProps) {
   const canSting = g.me.agency === 'MEDIA' && g.stingsLeft > 0 && !g.stingUsedThisRound;
   const stings = g.feed.filter((f) => f.kind === 'sting' && f.round === g.round && f.sting);
+  const waiting = g.players.filter((p) => !p.ready).length;
   return (
-    <div className="stack">
+    <>
+      <StepCard icon="🗣" title="Discuss">
+        Compare everyone's posts with your own clue. Who's lying? Talk on your call, or DM people in Chat.
+      </StepCard>
       <SuitcaseCard g={g} />
       <MyClue g={g} />
       <div className="card">
         <div className="row between">
-          <strong>📰 Press Releases</strong>
+          <strong>Everyone's posts</strong>
           {g.me.agency === 'MEDIA' && <span className="muted small">{g.stingsLeft} Sting{g.stingsLeft === 1 ? '' : 's'} left</span>}
         </div>
         <PressList g={g} rows={g.press} onSting={canSting ? (id) => act({ type: 'sting', target: id }) : undefined} />
@@ -270,19 +353,26 @@ function TalkPanel({ g, plan, setPlan }: PanelProps) {
       {stings.map((f) => (
         <StingCard key={f.id} g={g} s={f.sting!} />
       ))}
-      {g.mantri && g.round < g.rounds && (
-        <details className="plain">
-          <summary>🎩 Plan tonight's move now</summary>
-          <MantriOrders g={g} plan={plan} setPlan={setPlan} />
-        </details>
-      )}
+      <MantriPreview g={g} plan={plan} setPlan={setPlan} />
       <SecretCard g={g} />
-      <ReadyButton g={g} label="I'm done talking" />
-    </div>
+      <MainBar status={waitingFor(g, waiting)}>
+        {g.me.ready ? (
+          <button type="button" className="btn ghost" onClick={() => act({ type: 'ready', ready: false })}>
+            ✓ Done (tap to undo)
+          </button>
+        ) : (
+          <button type="button" className="btn primary" onClick={() => act({ type: 'ready', ready: true })}>
+            Done discussing
+          </button>
+        )}
+      </MainBar>
+    </>
   );
 }
 
-function ActionPanel({ g, plan, setPlan, warrantRegion, setWarrantRegion }: PanelProps) {
+// ───────────── Step 4: Act ─────────────
+
+function ActStep({ g, plan, setPlan, warrantRegion, setWarrantRegion }: PanelProps) {
   const court = g.news?.id === 'COURT';
   const isMedia = g.me.agency === 'MEDIA';
   const canPropose = !court && !isMedia && !g.me.suspended && !g.signedThisRound;
@@ -294,44 +384,71 @@ function ActionPanel({ g, plan, setPlan, warrantRegion, setWarrantRegion }: Pane
   const mine = g.warrants.filter((w) => w.signers.includes(g.me.id));
   const openGates = g.gates.filter((x) => !x.sealed).map((x) => x.code);
   const c = g.circular;
-
+  const waiting = g.players.filter((p) => !p.ready).length;
   const toggleInvite = (id: string) =>
     setInvite((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= 2 ? [cur[1], id] : [...cur, id]));
 
   return (
-    <div className="stack">
+    <>
+      <StepCard icon="⚖" title="Act">
+        Raid a region with a warrant, or vote to seal an exit gate. Nothing to do? Just tap Done.
+      </StepCard>
       <SuitcaseCard g={g} />
-      <div className="card">
-        <strong>⚖ Arrest warrant</strong>
-        {court && <p className="warn small">Court Stay: no warrants this round.</p>}
-        {isMedia && <p className="small muted">Media can't sign warrants.</p>}
-        {g.me.suspended && <p className="small muted">You're suspended this round.</p>}
-        {mine.map((w) => (
-          <div key={w.id} className="warrant">
-            <div>
-              <b>{REGIONS[w.region].name}</b> · signed by {w.signers.map((id) => nameOf(g, id)).join(', ')}
-            </div>
-            {w.invited.length > 0 && <div className="small muted">Waiting on {w.invited.map((id) => nameOf(g, id)).join(', ')}</div>}
-            <div className="small">{w.signers.length >= 2 ? '✓ Will execute at the end of Action' : 'Needs one more signature'}</div>
+
+      {invitations.map((w) => (
+        <div key={w.id} className="card invite-card">
+          <strong>
+            {nameOf(g, w.proposer)} wants you to raid {REGIONS[w.region].name}
+          </strong>
+          <div className="small muted">Right region: +6 for you. Wrong: −3 and you sit out a round.</div>
+          <div className="row gap">
+            <button type="button" className="btn primary small" disabled={g.signedThisRound} onClick={() => act({ type: 'warrantRespond', warrantId: w.id, accept: true })}>
+              Sign
+            </button>
+            <button type="button" className="btn ghost small" onClick={() => act({ type: 'warrantRespond', warrantId: w.id, accept: false })}>
+              Decline
+            </button>
           </div>
-        ))}
-        {invitations.map((w) => (
-          <div key={w.id} className="warrant invite">
-            <div>
-              {nameOf(g, w.proposer)} invites you to raid <b>{REGIONS[w.region].name}</b>
-            </div>
-            <div className="small muted">Right region: +6 for you. Wrong: −3 and a round's suspension.</div>
+        </div>
+      ))}
+
+      {mine.map((w) => (
+        <div key={w.id} className="card">
+          <strong>⚖ Your warrant: {REGIONS[w.region].name}</strong>
+          <div className="small">
+            Signed by {w.signers.map((id) => nameOf(g, id)).join(', ')}
+            {w.invited.length > 0 && <> · waiting on {w.invited.map((id) => nameOf(g, id)).join(', ')}</>}
+          </div>
+          <div className="small">{w.signers.length >= 2 ? '✓ The raid happens when this step ends' : 'Needs one more signature'}</div>
+        </div>
+      ))}
+
+      {c && (
+        <div className="card">
+          <strong>
+            🔒 Seal {REGIONS[c.gate].gate?.name} ({REGIONS[c.gate].name})?
+          </strong>
+          <div className="small muted">Proposed by {nameOf(g, c.proposer)}. Passes with a strict majority; no vote counts as no.</div>
+          <div className="small">
+            Yes: {Object.entries(c.votes).filter(([, v]) => v).map(([id]) => nameOf(g, id)).join(', ') || '—'} · No:{' '}
+            {Object.entries(c.votes).filter(([, v]) => !v).map(([id]) => nameOf(g, id)).join(', ') || '—'}
+          </div>
+          {!g.me.suspended && (
             <div className="row gap">
-              <button type="button" className="btn primary small" disabled={g.signedThisRound} onClick={() => act({ type: 'warrantRespond', warrantId: w.id, accept: true })}>
-                Sign
+              <button type="button" className={cls('btn small', c.votes[g.me.id] === true ? 'primary' : 'ghost')} onClick={() => act({ type: 'circularVote', yes: true })}>
+                Seal it
               </button>
-              <button type="button" className="btn ghost small" onClick={() => act({ type: 'warrantRespond', warrantId: w.id, accept: false })}>
-                Decline
+              <button type="button" className={cls('btn small', c.votes[g.me.id] === false ? 'primary' : 'ghost')} onClick={() => act({ type: 'circularVote', yes: false })}>
+                Keep it open
               </button>
             </div>
-          </div>
-        ))}
-        {canPropose && (
+          )}
+        </div>
+      )}
+
+      {canPropose && (
+        <details className="card" open={!!warrantRegion}>
+          <summary>⚖ Propose a warrant</summary>
           <div className="stack-s">
             <label className="field">
               <span>Region to raid</span>
@@ -344,7 +461,7 @@ function ActionPanel({ g, plan, setPlan, warrantRegion, setWarrantRegion }: Pane
                 ))}
               </select>
             </label>
-            <div className="small muted">Invite 1 or 2 co-signers (it executes with 2 or 3 signatures):</div>
+            <div className="small muted">Invite 1 or 2 people to sign with you. It goes ahead with 2 or 3 signatures.</div>
             <div className="seg wrap">
               {eligible.map((p) => (
                 <button key={p.id} type="button" className={cls('chip', invite.includes(p.id) && 'on')} onClick={() => toggleInvite(p.id)}>
@@ -361,37 +478,17 @@ function ActionPanel({ g, plan, setPlan, warrantRegion, setWarrantRegion }: Pane
               Propose warrant
             </button>
           </div>
-        )}
-      </div>
+        </details>
+      )}
+      {!canPropose && (court || isMedia || g.me.suspended) && (
+        <p className="small muted">
+          {court ? 'Court Stay: no warrants this round.' : isMedia ? "Media can't sign warrants." : "You're sitting out this round."}
+        </p>
+      )}
 
-      <div className="card">
-        <div className="row between">
-          <strong>🔒 Lookout Circular</strong>
-          <span className="muted small">{g.circularsLeft} left</span>
-        </div>
-        {c ? (
-          <div className="stack-s">
-            <div>
-              {nameOf(g, c.proposer)} proposes sealing <b>{REGIONS[c.gate].gate?.name}</b> ({REGIONS[c.gate].name})
-            </div>
-            <div className="small">
-              Yes: {Object.entries(c.votes).filter(([, v]) => v).map(([id]) => nameOf(g, id)).join(', ') || '—'}
-              <br />
-              No: {Object.entries(c.votes).filter(([, v]) => !v).map(([id]) => nameOf(g, id)).join(', ') || '—'}
-            </div>
-            {!g.me.suspended && (
-              <div className="row gap">
-                <button type="button" className={cls('btn small', c.votes[g.me.id] === true ? 'primary' : 'ghost')} onClick={() => act({ type: 'circularVote', yes: true })}>
-                  Seal it
-                </button>
-                <button type="button" className={cls('btn small', c.votes[g.me.id] === false ? 'primary' : 'ghost')} onClick={() => act({ type: 'circularVote', yes: false })}>
-                  Keep it open
-                </button>
-              </div>
-            )}
-            <div className="muted small">Passes with a strict majority. Silence counts as no.</div>
-          </div>
-        ) : g.circularsLeft > 0 && !g.me.suspended ? (
+      {!c && g.circularsLeft > 0 && !g.me.suspended && (
+        <details className="card">
+          <summary>🔒 Seal an exit gate ({g.circularsLeft} left)</summary>
           <div className="row gap">
             <select value={gate} onChange={(e) => setGate(e.target.value as RegionCode)}>
               <option value="">Pick an open gate</option>
@@ -405,24 +502,30 @@ function ActionPanel({ g, plan, setPlan, warrantRegion, setWarrantRegion }: Pane
               Propose
             </button>
           </div>
-        ) : (
-          <p className="small muted">{g.circularsLeft > 0 ? "You can't propose while suspended." : 'No circulars left.'}</p>
-        )}
-      </div>
-
-      {g.mantri && g.round < g.rounds && (
-        <details className="plain">
-          <summary>🎩 Plan tonight's move now</summary>
-          <MantriOrders g={g} plan={plan} setPlan={setPlan} />
+          <div className="small muted">Everyone votes. A sealed gate stays shut for the rest of the game.</div>
         </details>
       )}
+
+      <MantriPreview g={g} plan={plan} setPlan={setPlan} />
       <SecretCard g={g} />
-      <ReadyButton g={g} label="I'm done" />
-    </div>
+      <MainBar status={waitingFor(g, waiting)}>
+        {g.me.ready ? (
+          <button type="button" className="btn ghost" onClick={() => act({ type: 'ready', ready: false })}>
+            ✓ Done (tap to undo)
+          </button>
+        ) : (
+          <button type="button" className="btn primary" onClick={() => act({ type: 'ready', ready: true })}>
+            Done
+          </button>
+        )}
+      </MainBar>
+    </>
   );
 }
 
-function InquiryPanel({ g }: PanelProps) {
+// ───────────── Inquiry ─────────────
+
+function InquiryStep({ g }: PanelProps) {
   const picks = g.inquiry?.picks ?? 1;
   const [sel, setSel] = useState<string[]>(g.inquiry?.myVote ?? []);
   const voted = (g.inquiry?.myVote.length ?? 0) > 0;
@@ -434,62 +537,44 @@ function InquiryPanel({ g }: PanelProps) {
         ? `✈ Bhagodalal escaped from ${REGIONS[o.region].name}.`
         : `⌛ Bhagodalal stayed free (he was in ${REGIONS[o.region].name}).`;
   return (
-    <div className="stack">
+    <>
       <div className={cls('card outcome', o.type)}>
         <strong>{text}</strong>
       </div>
-      <div className="card">
-        <strong>🏛 Inquiry Commission</strong>
-        <p className="small">Who is Mantri ji? Name {picks === 1 ? 'one player' : `${picks} players`}. +2 for each correct name.</p>
-        <div className="seg wrap">
-          {g.players
-            .filter((p) => p.id !== g.me.id)
-            .map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={cls('chip', sel.includes(p.id) && 'on')}
-                onClick={() => setSel((cur) => (cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id].slice(-picks)))}
-              >
-                {labelOf(g, p.id)}
-              </button>
-            ))}
-        </div>
+      <StepCard icon="🏛" title="Who was Mantri ji?">
+        Pick {picks === 1 ? 'one player' : `${picks} players`}. You get +2 for each correct name.
+      </StepCard>
+      <div className="seg wrap">
+        {g.players
+          .filter((p) => p.id !== g.me.id)
+          .map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={cls('chip', sel.includes(p.id) && 'on')}
+              onClick={() => setSel((cur) => (cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id].slice(-picks)))}
+            >
+              {labelOf(g, p.id)}
+            </button>
+          ))}
+      </div>
+      <MainBar status={`${g.inquiry?.voted ?? 0} of ${g.inquiry?.needed ?? g.players.length} voted`}>
         <button type="button" className="btn primary" disabled={sel.length !== picks} onClick={() => act({ type: 'inquiryVote', targets: sel })}>
           {voted ? 'Update vote' : 'Cast vote'}
         </button>
-        <p className="muted small">
-          {g.inquiry?.voted ?? 0} of {g.inquiry?.needed ?? g.players.length} have voted.
-        </p>
-      </div>
-    </div>
+      </MainBar>
+    </>
   );
 }
 
 export function PhasePanel(props: PanelProps) {
-  const { g } = props;
-  const header = (
-    <p className="phase-hint">
-      {PHASE_HINT[g.phase]}
-      {g.me.agency && <span className="muted"> · You are {AGENCIES[g.me.agency].name}</span>}
-    </p>
-  );
-  let body: JSX.Element;
-  switch (g.phase) {
-    case 'night': body = <NightPanel {...props} />; break;
-    case 'deploy': body = <DeployPanel {...props} />; break;
-    case 'briefing': body = <BriefingPanel {...props} />; break;
-    case 'press': body = <PressPanel {...props} />; break;
-    case 'talk': body = <TalkPanel {...props} />; break;
-    case 'action': body = <ActionPanel {...props} />; break;
-    case 'inquiry': body = <InquiryPanel {...props} />; break;
-    default: body = <div />;
+  switch (props.g.phase) {
+    case 'night': return <NightStep {...props} />;
+    case 'deploy': case 'briefing': return <MoveStep {...props} />;
+    case 'press': return <ReportStep {...props} />;
+    case 'talk': return <DiscussStep {...props} />;
+    case 'action': return <ActStep {...props} />;
+    case 'inquiry': return <InquiryStep {...props} />;
+    default: return null;
   }
-  return (
-    <div>
-      {header}
-      {body}
-    </div>
-  );
 }
-

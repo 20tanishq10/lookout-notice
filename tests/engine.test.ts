@@ -5,14 +5,15 @@ import { Game } from '../src/engine/game';
 import { DIST, bearing, dist } from '../src/shared/graph';
 import { BORDER_PAIRS, REGIONS, REGION_CODES, gatesFor, type RegionCode } from '../src/shared/regions';
 import { Rng } from '../src/shared/rng';
-import { defaultSettings, type Settings } from '../src/shared/settings';
+import { defaultSettings, suggestedAgencies, type Settings } from '../src/shared/settings';
 import type { GameView } from '../src/shared/types';
 
 function setup(n: number, patch: Partial<Settings> = {}, seed = 7) {
   let t = 1_000_000;
   const clock = { now: () => t, advance: (ms: number) => void (t += ms) };
   const players = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${i}` }));
-  const settings: Settings = { ...defaultSettings(n), ...patch };
+  // Rule tests run the full (Advanced) rulebook unless a test says otherwise.
+  const settings: Settings = { ...defaultSettings(n), mode: 'advanced', agencies: suggestedAgencies(n, 'advanced'), ...patch };
   const game = new Game(players, settings, { seed, now: clock.now });
   const meta = { connected: Object.fromEntries(players.map((p) => [p.id, true])), hostId: 'p0' };
   const view = (id: string): GameView => game.viewFor(id, meta);
@@ -230,6 +231,56 @@ describe('rules', () => {
   });
 });
 
+describe('no timer and skipping', () => {
+  it('waits for everyone when timers are off, and Night waits for Mantri ji', () => {
+    const g = setup(5, { timers: 'off', news: false });
+    expect(g.game.phaseEndsAt).toBe(0);
+    g.clock.advance(10 * 60 * 1000);
+    expect(g.game.tick()).toBe(false);
+    expect(g.game.phase).toBe('deploy');
+    for (const p of g.players) g.game.act(p.id, { type: 'ready', ready: true });
+    g.game.tick();
+    expect(g.game.phase).toBe('press'); // clues arrive straight after Move: no Briefing step
+    for (const p of g.players) if (g.view(p.id).myClue) g.game.act(p.id, { type: 'press', claim: { none: true } });
+    g.game.tick();
+    expect(g.game.phase).toBe('talk');
+    for (const p of g.players) g.game.act(p.id, { type: 'ready', ready: true });
+    g.game.tick();
+    expect(g.game.phase).toBe('action');
+    for (const p of g.players) g.game.act(p.id, { type: 'ready', ready: true });
+    g.game.tick();
+    expect(g.game.phase).toBe('night');
+    g.clock.advance(10 * 60 * 1000);
+    g.game.tick();
+    expect(g.game.phase).toBe('night');
+    const m = g.game.debugState().mantris[0];
+    const other = g.players.find((p) => p.id !== m)!.id;
+    expect(g.game.act(other, { type: 'ready', ready: true }).ok).toBe(false);
+    expect(g.game.act(m, { type: 'ready', ready: true }).ok).toBe(true);
+    g.game.tick();
+    expect(g.game.phase).toBe('deploy');
+  });
+
+  it('lets the host skip a step', () => {
+    const g = setup(5, { timers: 'off' });
+    expect(g.game.forceAdvance()).toBe(true);
+    expect(g.game.phase).toBe('press');
+    g.game.pause();
+    expect(g.game.forceAdvance()).toBe(false);
+    g.game.resume();
+    expect(g.game.phaseEndsAt).toBe(0);
+  });
+
+  it('plays Simple mode with only the core rules', () => {
+    const players = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, name: `P${i}` }));
+    const game = new Game(players, defaultSettings(6), { seed: 3 });
+    expect(game.settings.mode).toBe('simple');
+    expect(game.settings.leaks + game.settings.hawala).toBe(0);
+    expect(game.settings.suitcase || game.settings.news || game.settings.hiddenAgencies).toBe(false);
+    expect([...game.settings.agencies].sort()).toEqual(['CBI', 'CUSTOMS', 'ED', 'NIA', 'POLICE', 'CRIME'].sort());
+  });
+});
+
 describe('random full games', () => {
   it('finishes hundreds of chaotic games without breaking or leaking secrets', () => {
     const outcomes: Record<string, number> = { arrest: 0, escape: 0, survived: 0 };
@@ -238,6 +289,8 @@ describe('random full games', () => {
       const n = 5 + rng.int(4);
       const agencies = rng.shuffle(AGENCY_IDS).slice(0, n) as AgencyId[];
       const patch: Partial<Settings> = {
+        mode: rng.pick(['simple', 'advanced'] as const),
+        timers: rng.pick(['off', 'short', 'standard'] as const),
         agencies,
         rounds: rng.pick([5, 6, 7] as const),
         distance: rng.pick(['exact', 'banded'] as const),
@@ -264,7 +317,7 @@ describe('random full games', () => {
             expect(v.bought).toBeNull();
             expect(JSON.stringify(v)).not.toContain('"fugitive"');
           }
-          if (patch.hiddenAgencies) {
+          if (g.game.settings.hiddenAgencies) {
             expect(v.settings.agencies).toEqual([]);
             if (v.me.role !== 'mantri') for (const p of v.players) if (p.id !== s.id) expect(p.agency).toBeUndefined();
           }
@@ -276,9 +329,16 @@ describe('random full games', () => {
       const rep = g.view('p0').report!;
       expect(rep).toBeTruthy();
       outcomes[rep.outcome.type]++;
+      if (patch.mode === 'simple') {
+        // Simple mode switches every advanced system off.
+        expect(g.game.settings.leaks).toBe(0);
+        expect(g.game.settings.suitcase).toBe(false);
+        expect(g.game.settings.news).toBe(false);
+        expect(rep.rounds.every((r) => r.steps.every((st) => st.how !== 'hawala'))).toBe(true);
+      }
       const evTotal = g.game.debugState().scoreEvents.reduce((a, e) => a + e.points, 0);
       expect(rep.scores.reduce((a, s) => a + s.total, 0)).toBe(evTotal);
-      expect(rep.roles.filter((r) => r.role === 'mantri').length).toBe(patch.mantris);
+      expect(rep.roles.filter((r) => r.role === 'mantri').length).toBe(patch.mode === 'simple' ? 1 : patch.mantris);
     }
     expect(outcomes.arrest).toBeGreaterThan(0);
     expect(outcomes.escape).toBeGreaterThan(0);

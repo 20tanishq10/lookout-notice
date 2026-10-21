@@ -1,8 +1,11 @@
 import { AGENCY_IDS, FILTERS, LOCATORS, type AgencyId } from './agencies';
 
-export type TimerPreset = 'short' | 'standard' | 'long';
+export type TimerPreset = 'off' | 'short' | 'standard' | 'long';
+export type GameMode = 'simple' | 'advanced';
 
 export interface Settings {
+  /** Simple mode = core rules only, easy agencies, few settings. Advanced = the full rulebook. */
+  mode: GameMode;
   agencies: AgencyId[];
   rounds: 5 | 6 | 7;
   timers: TimerPreset;
@@ -24,21 +27,29 @@ export interface Settings {
 export const MIN_PLAYERS = 5;
 export const MAX_PLAYERS = 8;
 
-/** Phase lengths in seconds. Night and Briefing are fixed so the wait gives nothing away. */
-export const TIMERS: Record<TimerPreset, Record<'night' | 'deploy' | 'briefing' | 'press' | 'talk' | 'action' | 'inquiry', number>> = {
-  short: { night: 10, deploy: 20, briefing: 10, press: 15, talk: 60, action: 20, inquiry: 60 },
-  standard: { night: 10, deploy: 25, briefing: 10, press: 20, talk: 90, action: 25, inquiry: 60 },
-  long: { night: 10, deploy: 35, briefing: 10, press: 30, talk: 120, action: 35, inquiry: 60 },
+type TimedPhase = 'night' | 'deploy' | 'briefing' | 'press' | 'talk' | 'action' | 'inquiry';
+
+/** Phase lengths in seconds. 0 = no timer: the step ends when everyone is done (or the host skips it). */
+export const TIMERS: Record<TimerPreset, Record<TimedPhase, number>> = {
+  off: { night: 0, deploy: 0, briefing: 0, press: 0, talk: 0, action: 0, inquiry: 0 },
+  short: { night: 10, deploy: 20, briefing: 0, press: 15, talk: 60, action: 20, inquiry: 60 },
+  standard: { night: 10, deploy: 25, briefing: 0, press: 20, talk: 90, action: 25, inquiry: 60 },
+  long: { night: 10, deploy: 35, briefing: 0, press: 30, talk: 120, action: 35, inquiry: 60 },
 };
 
-export function suggestedAgencies(players: number): AgencyId[] {
-  const base: AgencyId[] = ['CBI', 'NIA', 'ED', 'POLICE', 'MEDIA', 'IB', 'CUSTOMS', 'CRIME'];
+/** The easy agencies Simple mode deals, in the order they're added as players join. */
+export const SIMPLE_AGENCIES: AgencyId[] = ['CBI', 'NIA', 'POLICE', 'ED', 'CUSTOMS', 'CRIME', 'RAW', 'CYBER'];
+const ADVANCED_ORDER: AgencyId[] = ['CBI', 'NIA', 'ED', 'POLICE', 'MEDIA', 'IB', 'CUSTOMS', 'CRIME'];
+
+export function suggestedAgencies(players: number, mode: GameMode = 'simple'): AgencyId[] {
+  const base = mode === 'simple' ? SIMPLE_AGENCIES : ADVANCED_ORDER;
   return base.slice(0, Math.max(MIN_PLAYERS, Math.min(MAX_PLAYERS, players)));
 }
 
 export function defaultSettings(players = MIN_PLAYERS): Settings {
   return {
-    agencies: suggestedAgencies(players),
+    mode: 'simple',
+    agencies: suggestedAgencies(players, 'simple'),
     rounds: 6,
     timers: 'standard',
     distance: 'exact',
@@ -56,34 +67,53 @@ export function defaultSettings(players = MIN_PLAYERS): Settings {
   };
 }
 
+/** The rules actually played: Simple mode switches every advanced system off. */
+export function effectiveSettings(s: Settings): Settings {
+  if (s.mode !== 'simple') return { ...s, agencies: [...s.agencies] };
+  return {
+    ...s,
+    agencies: [...s.agencies],
+    distance: 'exact',
+    mantris: 1,
+    leaks: 0,
+    hawala: 0,
+    suitcase: false,
+    gates: 6,
+    circulars: 3,
+    earliestEscape: 4,
+    news: false,
+    hiddenAgencies: false,
+  };
+}
+
 export const PRESETS: { id: string; name: string; desc: string; patch: (s: Settings, players: number) => Partial<Settings> }[] = [
   {
     id: 'training',
     name: 'Training',
     desc: 'No Planted Leaks, Suitcase or Breaking News. Long timers.',
-    patch: () => ({ leaks: 0, suitcase: false, news: false, timers: 'long', mantris: 1, hawala: 2, hiddenAgencies: false, rounds: 6, earliestEscape: 4 }),
+    patch: () => ({ mode: 'advanced', leaks: 0, suitcase: false, news: false, timers: 'long', mantris: 1, hawala: 2, hiddenAgencies: false, rounds: 6, earliestEscape: 4 }),
   },
   {
     id: 'classic',
     name: 'Classic',
-    desc: 'The default rules.',
+    desc: 'The full rulebook with default settings.',
     patch: (_s, players) => {
       const d = defaultSettings(players);
-      const { agencies: _a, testRole: _t, ...rest } = d;
-      return rest;
+      const { agencies: _a, testRole: _t, mode: _m, ...rest } = d;
+      return { ...rest, mode: 'advanced' };
     },
   },
   {
     id: 'paranoia',
     name: 'Paranoia',
     desc: '2 Mantris at 7–8 players, 3 Hawala moves, hidden agencies.',
-    patch: (_s, players) => ({ mantris: players >= 7 ? 2 : 1, hawala: 3, leaks: 2, suitcase: true, hiddenAgencies: true }),
+    patch: (_s, players) => ({ mode: 'advanced', mantris: players >= 7 ? 2 : 1, hawala: 3, leaks: 2, suitcase: true, hiddenAgencies: true }),
   },
   {
     id: 'blitz',
     name: 'Blitz',
     desc: '5 rounds, short timers, escape from Round 3.',
-    patch: () => ({ rounds: 5, timers: 'short', earliestEscape: 3 }),
+    patch: () => ({ mode: 'advanced', rounds: 5, timers: 'short', earliestEscape: 3 }),
   },
 ];
 
@@ -99,11 +129,13 @@ export function checkSettings(s: Settings, players: number): SettingsCheck {
   if (players > MAX_PLAYERS) errors.push(`At most ${MAX_PLAYERS} players.`);
   if (new Set(s.agencies).size !== s.agencies.length) errors.push('Each agency can only be picked once.');
   if (s.agencies.length !== players) errors.push(`Pick exactly one agency per player (${s.agencies.length} picked, ${players} players).`);
-  if (s.mantris === 2 && players < 7) errors.push('Two Mantris need 7 or 8 players.');
-  const locators = s.agencies.filter((a) => LOCATORS.includes(a)).length;
-  if (locators < 2) warnings.push('Fewer than 2 Locator agencies (CBI, NIA, Cyber Cell): the hunt gets very hard to solve.');
-  if (!s.agencies.some((a) => FILTERS.includes(a))) warnings.push('No Filter agency (ED, Income Tax) in play.');
-  if (!s.agencies.includes('MEDIA')) warnings.push('No Media: there will be no Stings this game.');
+  if (s.mode === 'advanced') {
+    if (s.mantris === 2 && players < 7) errors.push('Two Mantris need 7 or 8 players.');
+    const locators = s.agencies.filter((a) => LOCATORS.includes(a)).length;
+    if (locators < 2) warnings.push('Fewer than 2 Locator agencies (CBI, NIA, Cyber Cell): the hunt gets very hard to solve.');
+    if (!s.agencies.some((a) => FILTERS.includes(a))) warnings.push('No Filter agency (ED, Income Tax) in play.');
+    if (!s.agencies.includes('MEDIA')) warnings.push('No Media: there will be no Stings this game.');
+  }
   return { errors, warnings };
 }
 
@@ -111,7 +143,8 @@ export function checkSettings(s: Settings, players: number): SettingsCheck {
  * Rough balance estimate from 0 (agencies favoured) to 100 (Mantri favoured); 50 is even.
  * Placeholder until the bot simulator tunes it.
  */
-export function balanceEstimate(s: Settings): number {
+export function balanceEstimate(raw: Settings): number {
+  const s = effectiveSettings(raw);
   let v = 50;
   for (const a of s.agencies) {
     if (LOCATORS.includes(a)) v -= 4;
@@ -141,12 +174,13 @@ export function sanitizeSettings(base: Settings, patch: unknown): Settings {
   const pickBool = (k: keyof Settings) => {
     if (typeof p[k] === 'boolean') (out as unknown as Record<string, unknown>)[k] = p[k];
   };
+  if (p.mode === 'simple' || p.mode === 'advanced') out.mode = p.mode;
   if (Array.isArray(p.agencies)) {
     const list = p.agencies.filter(isAgencyId);
     out.agencies = [...new Set(list)].slice(0, MAX_PLAYERS);
   }
   pickNum('rounds', [5, 6, 7] as const);
-  if (p.timers === 'short' || p.timers === 'standard' || p.timers === 'long') out.timers = p.timers;
+  if (p.timers === 'off' || p.timers === 'short' || p.timers === 'standard' || p.timers === 'long') out.timers = p.timers;
   if (p.distance === 'exact' || p.distance === 'banded') out.distance = p.distance;
   pickNum('mantris', [1, 2] as const);
   pickNum('leaks', [0, 1, 2] as const);

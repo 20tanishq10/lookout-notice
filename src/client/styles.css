@@ -182,7 +182,8 @@ details.plain { padding: 0 2px; }
 }
 .tb-left { flex: 1; min-width: 0; }
 .tb-round { font-size: 11.5px; color: var(--muted); }
-.tb-phase { font-weight: 700; font-size: 16px; }
+.tb-phase { font-weight: 700; font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-round { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-timer { font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; min-width: 64px; text-align: center; }
 .tb-timer.urgent { color: var(--red); }
 .tb-timer.paused { font-size: 14px; color: var(--gold); }
@@ -198,7 +199,7 @@ details.plain { padding: 0 2px; }
 .menu .danger { color: #ff8787; }
 
 .map-area { position: relative; flex: none; background: #0b0d11; border-bottom: 1px solid var(--line); }
-.board-wrap { height: 34dvh; overflow: auto; -webkit-overflow-scrolling: touch; transition: height 0.25s; }
+.board-wrap { height: 30dvh; overflow: auto; -webkit-overflow-scrolling: touch; transition: height 0.25s; }
 .map-area.tall .board-wrap { height: 52dvh; }
 .board-wrap.static { height: auto; overflow: visible; border-radius: 10px; background: #0b0d11; margin: 8px 0; }
 .map-area.collapsed { min-height: 40px; }
@@ -361,3 +362,43 @@ details.plain { padding: 0 2px; }
   .tabs { grid-area: tabs; position: static; height: var(--tabs-h); padding-bottom: 0; max-width: none; margin: 0; width: auto; }
   .toast { bottom: 24px; }
 }
+
+/* ── simpler steps: instruction card + one main button ── */
+.panel > .stepcard, .panel .stepcard { margin: 8px 0 12px; }
+.stepcard {
+  display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius);
+  background: #1b2330; border: 1px solid #2f4057;
+}
+.stepcard strong { font-size: 16px; display: block; margin-bottom: 2px; }
+.step-icon { font-size: 26px; line-height: 1; }
+.panel .card { margin-bottom: 12px; }
+.mainbar {
+  /* Sticky offsets are measured inside the panel's padding, which already clears the tab bar. */
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; align-items: center; gap: 12px; margin-top: 4px; padding: 10px 12px;
+  background: #11151bf2; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 -6px 18px #0009;
+  backdrop-filter: blur(4px);
+}
+.mainbar .btn { flex: 1; min-height: 48px; font-size: 16px; }
+.mainbar:not(:has(.btn)) { justify-content: center; }
+.invite-card { border-color: #c92a2a; background: #2a1212; display: flex; flex-direction: column; gap: 8px; }
+.mode-seg { margin: 6px 0; }
+.mode-seg .chip { flex: 1; }
+
+/* ── how-to-play walkthrough ── */
+.overlay {
+  position: fixed; inset: 0; z-index: 60; background: #000b; display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.tutorial {
+  position: relative; width: min(100%, 420px); background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+  padding: 22px 18px 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 60px #000c;
+}
+.tutorial .close { position: absolute; right: 10px; top: 10px; }
+.tutorial .t-icon { font-size: 40px; }
+.tutorial h2 { font-size: 20px; margin: 0; }
+.tutorial ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
+.dots { display: flex; gap: 6px; justify-content: center; }
+.dots .d { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.dots .d.on { background: var(--saffron); }
+
+
